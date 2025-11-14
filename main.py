@@ -308,4 +308,4 @@ else:
                 f"({prob_stay_above:.1f}% stayed at or above the floor)."
             )
     if len(explanation_lines) >= 3:
-        st.write("Quick takeaway: " + " ".join(explanation_lines))
+        st.text("Quick takeaway: " + " ".join(explanation_lines))
