@@ -208,7 +208,7 @@ def _probability_rows(
         start_idx = start_idx[mask] if start_idx.size else np.array([], dtype=int)
         if np.isfinite(threshold_factor):
             prob_below = float(np.mean(lump_arr < threshold_factor))
-            prob_above = float(1.0 - prob_below)
+            prob_above = float(np.mean(lump_arr >= threshold_factor))
         else:
             prob_below = float("nan")
             prob_above = float("nan")
@@ -252,6 +252,8 @@ if not result_rows:
 else:
     results_df = pd.DataFrame(result_rows)
     results_df.sort_values(by=["Source", "Chance Below Target (%)"], ascending=[True, False], inplace=True)
+    if "Chance Below Target (%)" in results_df.columns:
+        results_df["Chance At/Above Target (%)"] = 100.0 - results_df["Chance Below Target (%)"]
     display_df = results_df.copy()
     currency_cols = ["Median Ending ($)", "90th % Ending ($)", "Worst Ending ($)"]
     for col in currency_cols:
