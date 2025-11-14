@@ -120,15 +120,6 @@ target_value = sb.number_input(
     format="%i",
     help="Chance is computed on the current balance growing into the future and finishing below this amount.",
 )
-prob_mode = sb.radio(
-    "Probability focus",
-    options=["Below target", "At or above target"],
-    index=0,
-    help="Switch to see the chance of finishing below the target or meeting/exceeding it.",
-)
-prob_mode_key = "above" if prob_mode.startswith("At") else "below"
-prob_column_label = "Chance Below Target (%)" if prob_mode_key == "below" else "Chance At/Above Target (%)"
-prob_subheader_suffix = "below the target" if prob_mode_key == "below" else "at or above the target"
 fee_pct = sb.slider(
     "Annual fee (%)",
     min_value=0.0,
@@ -200,14 +191,12 @@ def _probability_rows(
     months: int,
     curr: float,
     target: float,
-    prob_mode: str,
 ) -> list[dict]:
     rows = []
     if df_src is None or not metas:
         return rows
     date_series = df_src["Date"] if "Date" in df_src.columns else None
     threshold_factor = float(target) / float(curr) if curr > 0 else float("nan")
-    prob_label = "Chance Below Target (%)" if prob_mode == "below" else "Chance At/Above Target (%)"
     for meta in metas:
         col = meta["raw"]
         factors = df_src[col]
@@ -219,9 +208,10 @@ def _probability_rows(
         start_idx = start_idx[mask] if start_idx.size else np.array([], dtype=int)
         if np.isfinite(threshold_factor):
             prob_below = float(np.mean(lump_arr < threshold_factor))
-            prob = prob_below if prob_mode == "below" else float(1.0 - prob_below)
+            prob_above = float(1.0 - prob_below)
         else:
-            prob = float("nan")
+            prob_below = float("nan")
+            prob_above = float("nan")
         worst = float(np.min(lump_arr)) * curr if curr > 0 else float("nan")
         median = _quantile_linear(lump_arr, 0.5) * curr if curr > 0 else float("nan")
         p90 = _quantile_linear(lump_arr, 0.9) * curr if curr > 0 else float("nan")
@@ -238,7 +228,8 @@ def _probability_rows(
             {
                 "Source": source_label,
                 "Allocation": _pretty_name(source_label, meta["clean"]),
-                prob_label: prob * 100.0,
+                "Chance Below Target (%)": prob_below * 100.0,
+                "Chance At/Above Target (%)": prob_above * 100.0,
                 "Median Ending ($)": median,
                 "90th % Ending ($)": p90,
                 "Worst Ending ($)": worst,
@@ -250,23 +241,23 @@ def _probability_rows(
 
 result_rows: list[dict] = []
 result_rows.extend(
-    _probability_rows("Global", df_lbm, selected_lbm, months_out, current_value, target_value, prob_mode_key)
+    _probability_rows("Global", df_lbm, selected_lbm, months_out, current_value, target_value)
 )
 result_rows.extend(
-    _probability_rows("SP500", df_spx, selected_spx, months_out, current_value, target_value, prob_mode_key)
+    _probability_rows("SP500", df_spx, selected_spx, months_out, current_value, target_value)
 )
 
 if not result_rows:
     st.info("No valid simulations for the current selections.")
 else:
     results_df = pd.DataFrame(result_rows)
-    results_df.sort_values(by=["Source", prob_column_label], ascending=[True, False], inplace=True)
+    results_df.sort_values(by=["Source", "Chance Below Target (%)"], ascending=[True, False], inplace=True)
     display_df = results_df.copy()
     currency_cols = ["Median Ending ($)", "90th % Ending ($)", "Worst Ending ($)"]
     for col in currency_cols:
         if col in display_df:
             display_df[col] = display_df[col].apply(_fmt_currency)
-    st.subheader(f"Historical chance of finishing {prob_subheader_suffix}")
+    st.subheader("Historical chance of finishing below vs. at/above the target")
     st.dataframe(
         display_df,
         use_container_width=True,
@@ -274,7 +265,8 @@ else:
         column_config={
             "Source": st.column_config.Column(width="small"),
             "Allocation": st.column_config.Column(width="medium"),
-            prob_column_label: st.column_config.NumberColumn(format="%.1f%%", width="small"),
+            "Chance Below Target (%)": st.column_config.NumberColumn(format="%.1f%%", width="small"),
+            "Chance At/Above Target (%)": st.column_config.NumberColumn(format="%.1f%%", width="small"),
             "Median Ending ($)": st.column_config.Column(width="medium"),
             "90th % Ending ($)": st.column_config.Column(width="medium"),
             "Worst Ending ($)": st.column_config.Column(width="medium"),
