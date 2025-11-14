@@ -276,3 +276,36 @@ else:
             "# of Tests": st.column_config.Column(width="small"),
         },
     )
+
+    explanation_lines: list[str] = []
+    goal_text = f"Your goal is to have {_fmt_currency(target_value)} in {months_out} months."
+    current_text = f"Your current portfolio is {_fmt_currency(current_value)}."
+    explanation_lines.extend([goal_text, current_text])
+    if target_value >= current_value:
+        metric = "Chance At/Above Target (%)"
+        series = results_df[metric].replace([np.inf, -np.inf], np.nan).dropna() if metric in results_df else pd.Series([], dtype=float)
+        if not series.empty:
+            best_idx = series.idxmax()
+            best_row = results_df.loc[best_idx]
+            best_prob = float(best_row[metric])
+            allocation_desc = f"{best_row['Allocation']} ({best_row['Source']})"
+            explanation_lines.append(
+                f"The allocation that gives you the greatest chance of being at or above the goal is {allocation_desc}, "
+                f"with roughly {best_prob:.1f}% of historical windows meeting or exceeding the target."
+            )
+    else:
+        metric = "Chance Below Target (%)"
+        series = results_df[metric].replace([np.inf, -np.inf], np.nan).dropna() if metric in results_df else pd.Series([], dtype=float)
+        if not series.empty:
+            best_idx = series.idxmin()
+            best_row = results_df.loc[best_idx]
+            prob_below = float(best_row[metric])
+            prob_stay_above = max(0.0, 100.0 - prob_below)
+            allocation_desc = f"{best_row['Allocation']} ({best_row['Source']})"
+            explanation_lines.append(
+                f"Because the target is below today’s balance, we focus on the chance of dipping under that floor. "
+                f"{allocation_desc} keeps that risk to about {prob_below:.1f}% of the historical windows "
+                f"({prob_stay_above:.1f}% stayed at or above the floor)."
+            )
+    if len(explanation_lines) >= 3:
+        st.markdown("**Quick takeaway**\n\n" + " ".join(explanation_lines))
