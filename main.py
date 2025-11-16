@@ -19,7 +19,7 @@ PRETTY_SPX = {f"spx{p}e": f"{p}% Equity" for p in [100, 90, 80, 70, 60, 50, 40, 
 PERIOD_STEP = 1  # monthly factors, advance one row per month
 
 st.set_page_config(layout="wide")
-st.title("Chance of Falling Below a Target")
+st.title("Chance of Falling Below or Rising Above a Target")
 st.caption("Estimate, for every allocation, the fraction of historical windows that finish below a selected target.")
 
 
