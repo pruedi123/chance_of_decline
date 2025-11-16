@@ -23,8 +23,9 @@ st.title("Chance of Falling Below a Target")
 st.caption("Estimate, for every allocation, the fraction of historical windows that finish below a selected target.")
 
 
+@st.cache_data
 def _load_factors(file_path: str, sheet: str, prefix: str) -> tuple[pd.DataFrame | None, list[dict]]:
-    """Return (dataframe, allocation_meta). Each meta has raw + clean names."""
+    """Return (dataframe, allocation_meta). Each meta has raw + clean names. Cached to avoid re-reading files."""
     try:
         df = pd.read_excel(file_path, sheet_name=sheet)
     except Exception as exc:
@@ -57,29 +58,56 @@ def _quantile_linear(arr: np.ndarray, q: float) -> float:
 
 def simulate_lump_values(factors: pd.Series, months: int, step: int) -> tuple[np.ndarray, np.ndarray]:
     """Rolling-window lump-sum growth factors per $1 invested over 'months' months."""
-    values = []
-    starts = []
     n = len(factors)
     months = int(months)
-    if months <= 0:
-        return np.array(values, dtype=float), np.array(starts, dtype=int)
+    if months <= 0 or n == 0:
+        return np.array([], dtype=float), np.array([], dtype=int)
+
+    # Fast path for monthly data (step == 1) using prefix sums of log factors.
+    if step == 1:
+        arr = factors.to_numpy(dtype=float, copy=False)
+        valid = np.isfinite(arr) & (arr > 0)
+        if len(arr) < months:
+            return np.array([], dtype=float), np.array([], dtype=int)
+
+        # Prefix sums to quickly get window log-products and invalid counts.
+        log_vals = np.zeros_like(arr, dtype=float)
+        log_vals[valid] = np.log(arr[valid])
+        invalid_prefix = np.concatenate(([0], np.cumsum(~valid)))
+        log_prefix = np.concatenate(([0.0], np.cumsum(log_vals)))
+
+        window_end = np.arange(months - 1, n)
+        window_start = window_end - (months - 1)
+
+        invalid_in_window = invalid_prefix[window_end + 1] - invalid_prefix[window_start]
+        ok_mask = invalid_in_window == 0
+        if not np.any(ok_mask):
+            return np.array([], dtype=float), np.array([], dtype=int)
+
+        log_sum = log_prefix[window_end[ok_mask] + 1] - log_prefix[window_start[ok_mask]]
+        values = np.exp(log_sum)
+        return values.astype(float), window_start[ok_mask].astype(int)
+
+    # Fallback for other step sizes (rare) uses the original loop.
+    values = []
+    starts = []
     max_start = n - (step * (months - 1))
     if max_start <= 0:
-        return np.array(values, dtype=float), np.array(starts, dtype=int)
+        return np.array([], dtype=float), np.array([], dtype=int)
     for start in range(max_start):
         total = 1.0
-        valid = True
+        valid_window = True
         for period in range(months):
             idx = start + period * step
             if idx >= n:
-                valid = False
+                valid_window = False
                 break
             f_val = factors.iloc[idx]
             if pd.isna(f_val) or f_val <= 0:
-                valid = False
+                valid_window = False
                 break
             total *= float(f_val)
-        if valid:
+        if valid_window:
             values.append(total)
             starts.append(start)
     return np.array(values, dtype=float), np.array(starts, dtype=int)
@@ -142,6 +170,12 @@ if src_kind in ("LBM", "BOTH"):
     df_lbm, metas_lbm = _load_factors("global_mo_factors.xlsx", "factors_mo", "LBM")
 if src_kind in ("SPX", "BOTH"):
     df_spx, metas_spx = _load_factors("spx_mo_factors.xlsx", "factors_mo", "SPX")
+
+# Work on copies so cached data stays pristine across reruns with different fees.
+if df_lbm is not None:
+    df_lbm = df_lbm.copy()
+if df_spx is not None:
+    df_spx = df_spx.copy()
 
 annual_fee = float(fee_pct) / 100.0
 monthly_fee = annual_fee / 12.0
